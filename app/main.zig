@@ -1,27 +1,32 @@
 const std = @import("std");
 const stdout = std.io.getStdOut().writer();
+const Scanner = @import("./bencoded.zig").Scanner;
 const allocator = std.heap.page_allocator;
+
+const Command = enum {
+    decode,
+};
 
 pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     if (args.len < 3) {
-        try stdout.print("Usage: your_bittorrent.zig <command> <args>\n", .{});
-        std.os.exit(1);
+        fatalHelp();
     }
 
-    const command = args[1];
-    if (std.mem.eql(u8, command, "decode")) {
-        // Uncomment this block to pass the first stage
-        const encodedStr = args[2];
-        const decodedStr = decodeBencode(encodedStr) catch {
-            try stdout.print("Invalid encoded value\n", .{});
-            std.os.exit(1);
-        };
-        var string = std.ArrayList(u8).init(allocator);
-        try std.json.stringify(decodedStr.*, .{}, string.writer());
-        const jsonStr = try string.toOwnedSlice();
-        try stdout.print("{s}\n", .{jsonStr});
+    const command = std.meta.stringToEnum(Command, args[1]) orelse {
+        fatalHelp();
+    };
+
+    switch (command) {
+        .decode => {
+            var bencoded_scanner = Scanner.initWithCompleteInput(allocator, args[2]);
+            while (bencoded_scanner.next()) |v| {
+                const json_value = try v.toJsonValue(allocator);
+                defer allocator.free(json_value);
+                std.debug.print("{s}\n", .{json_value});
+            }
+        },
     }
 }
 
@@ -36,4 +41,13 @@ fn decodeBencode(encodedValue: []const u8) !*const []const u8 {
         try stdout.print("Only strings are supported at the moment\n", .{});
         std.os.exit(1);
     }
+}
+
+fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
+    std.debug.print(fmt, args);
+    std.process.exit(1);
+}
+
+fn fatalHelp() noreturn {
+    fatal("Usage: your_bittorent.zig <command> <args>", .{});
 }
