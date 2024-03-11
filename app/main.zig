@@ -24,22 +24,9 @@ pub fn main() !void {
             while (bencoded_scanner.next()) |v| {
                 const json_value = try v.toJsonValue(allocator);
                 defer allocator.free(json_value);
-                std.debug.print("{s}\n", .{json_value});
+                try stdout.print("{s}\n", .{json_value});
             }
         },
-    }
-}
-
-fn decodeBencode(encodedValue: []const u8) !*const []const u8 {
-    if (encodedValue[0] >= '0' and encodedValue[0] <= '9') {
-        const firstColon = std.mem.indexOf(u8, encodedValue, ":");
-        if (firstColon == null) {
-            return error.InvalidArgument;
-        }
-        return &encodedValue[firstColon.? + 1 ..];
-    } else {
-        try stdout.print("Only strings are supported at the moment\n", .{});
-        std.os.exit(1);
     }
 }
 
