@@ -48,7 +48,7 @@ pub const Value = union(enum) {
             fatal("Error parsing string length", .{});
         };
 
-        return .{ .value = Value{ .string = bytes[delimiter_index + 1 .. delimiter_index + string_len + 1] }, .new_cursor = delimiter_index + string_len };
+        return .{ .value = Value{ .string = bytes[delimiter_index + 1 .. delimiter_index + string_len + 1] }, .new_cursor = delimiter_index + string_len + 1 };
     }
 
     fn parseAssignedInt(bytes: []const u8, cursor: usize) ParseResult {
@@ -110,7 +110,7 @@ pub const Scanner = struct {
     }
 
     pub fn next(self: *Scanner) ?Value {
-        if (self.cursor == self.input.len - 1) {
+        if (self.cursor >= self.input.len - 1) {
             return null;
         }
         const parse_result = Value.parseValue(self.gpa, self.input, self.cursor) catch {
