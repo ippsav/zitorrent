@@ -24,7 +24,7 @@ pub const Value = union(enum) {
         defer values_list.deinit();
         while (bytes[index] != 'e' and index != bytes.len - 1) {
             const parse_result = Value.parseValue(allocator, bytes, index) catch {
-                fatal("Error parsing list", .{});
+                fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
             };
             values_list.append(parse_result.value) catch {
                 fatal("Out of memory, exiting...", .{});
@@ -34,7 +34,7 @@ pub const Value = union(enum) {
         const list = values_list.toOwnedSlice() catch {
             fatal("Boom", .{});
         };
-        return .{ .value = .{ .list = list }, .new_cursor = index };
+        return .{ .value = .{ .list = list }, .new_cursor = index + 1 };
     }
 
     fn parseString(bytes: []const u8, cursor: usize) ParseResult {
