@@ -48,7 +48,7 @@ pub const Value = union(enum) {
             fatal("Error parsing string length", .{});
         };
 
-        return .{ .value = Value{ .string = bytes[delimiter_index + 1 .. delimiter_index + string_len + 1] }, .new_cursor = delimiter_index + string_len + 1 };
+        return .{ .value = Value{ .string = bytes[delimiter_index + 1 .. delimiter_index + string_len + 1] }, .new_cursor = delimiter_index + string_len };
     }
 
     fn parseAssignedInt(bytes: []const u8, cursor: usize) ParseResult {
