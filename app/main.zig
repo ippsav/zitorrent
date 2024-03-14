@@ -22,9 +22,7 @@ pub fn main() !void {
         .decode => {
             var bencoded_scanner = Scanner.initWithCompleteInput(allocator, args[2]);
             while (bencoded_scanner.next()) |v| {
-                const json_value = try v.toJsonValue(allocator);
-                defer allocator.free(json_value);
-                try stdout.print("{s}\n", .{json_value});
+                try stdout.print("{}\n", .{v});
             }
         },
     }

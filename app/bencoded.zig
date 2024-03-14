@@ -22,7 +22,7 @@ pub const Value = union(enum) {
         var index = cursor + 1;
         var values_list = std.ArrayList(Value).init(allocator);
         defer values_list.deinit();
-        while (bytes[index] != 'e' and index != bytes.len - 1) {
+        while (bytes[index] != 'e') {
             const parse_result = Value.parseValue(allocator, bytes, index) catch {
                 fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
             };
@@ -64,35 +64,28 @@ pub const Value = union(enum) {
         return .{ .value = Value{ .int = parsedNumber }, .new_cursor = cursor + number_length + 2 };
     }
 
-    pub fn toJsonValue(self: Value, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn toJsonValue(self: Value, writer: anytype) !void {
         switch (self) {
             .string => |v| {
-                var string = std.ArrayList(u8).init(allocator);
-                defer string.deinit();
-                try std.json.stringify(v, .{}, string.writer());
-                return string.toOwnedSlice();
+                try std.json.stringify(v, .{}, writer);
             },
             .int => |n| {
-                var string = std.ArrayList(u8).init(allocator);
-                defer string.deinit();
-                try std.json.stringify(n, .{}, string.writer());
-                return string.toOwnedSlice();
+                try std.json.stringify(n, .{}, writer);
             },
             .list => |l| {
-                var string = std.ArrayList(u8).init(allocator);
-                defer string.deinit();
-                var writer = string.writer();
-                _ = try writer.write("[");
+                try writer.writeByte('[');
                 for (l, 0..) |v, i| {
-                    const json_value = try v.toJsonValue(allocator);
-                    _ = try writer.write(json_value);
-                    allocator.free(json_value);
+                    try v.toJsonValue(writer);
                     if (i != l.len - 1) try writer.writeByte(',');
                 }
-                _ = try writer.write("]");
-                return string.toOwnedSlice();
+                _ = try writer.writeByte(']');
             },
         }
+    }
+    pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try self.toJsonValue(writer);
     }
 };
 
