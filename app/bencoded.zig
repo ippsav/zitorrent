@@ -2,11 +2,16 @@ const std = @import("std");
 
 const ParseResult = struct { value: Value, new_cursor: usize };
 
+pub const KVPair = struct {
+    key: Value,
+    value: Value,
+};
+
 pub const Value = union(enum) {
     string: []const u8,
     int: i64,
     list: []Value,
-    dictionary: std.StringHashMap(Value),
+    dictionary: std.StringArrayHashMap(KVPair),
 
     fn parseValue(gpa: std.mem.Allocator, bytes: []const u8, cursor: usize) !ParseResult {
         switch (bytes[cursor]) {
@@ -22,7 +27,10 @@ pub const Value = union(enum) {
 
     fn parseDictionary(allocator: std.mem.Allocator, bytes: []const u8, cursor: usize) ParseResult {
         var index = cursor + 1;
-        var values_map = std.StringHashMap(Value).init(allocator);
+        var values_map = std.StringArrayHashMap(KVPair).init(allocator);
+
+        var key_value_pairs = std.ArrayList(KVPair).init(allocator);
+
         while (bytes[index] != 'e') {
             const key_result = Value.parseString(bytes, index);
             index = key_result.new_cursor;
@@ -31,10 +39,24 @@ pub const Value = union(enum) {
                 fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
             };
             index = value_result.new_cursor;
-            values_map.put(key_result.value.string, value_result.value) catch {
-                fatal("Out of memory, exiting...", .{});
+            key_value_pairs.append(.{ .key = key_result.value, .value = value_result.value }) catch {
+                fatal("Out of memory, exiting ...", .{});
             };
         }
+
+        var key_value_pairs_slice = key_value_pairs.toOwnedSlice() catch {
+            fatal("Out of memory, exiting ...", .{});
+        };
+        defer allocator.free(key_value_pairs_slice);
+        key_value_pairs.deinit();
+
+        std.sort.insertion(KVPair, key_value_pairs_slice, {}, compareKVPair);
+        for (key_value_pairs_slice) |entry| {
+            values_map.put(entry.key.string, entry) catch {
+                fatal("Out of memory, exiting ...", .{});
+            };
+        }
+
         return .{ .value = .{ .dictionary = values_map }, .new_cursor = index + 1 };
     }
 
@@ -102,13 +124,12 @@ pub const Value = union(enum) {
             },
             .dictionary => |map| {
                 _ = try writer.writeByte('{');
-                var map_iterator = map.iterator();
                 var i: usize = 0;
-                while (map_iterator.next()) |v| {
-                    try writer.writeByte('"');
-                    _ = try writer.write(v.key_ptr.*);
-                    _ = try writer.write("\":");
-                    try v.value_ptr.*.toJsonValue(writer);
+                var map_iterator = map.iterator();
+                while (map_iterator.next()) |k| {
+                    try k.value_ptr.*.key.toJsonValue(writer);
+                    _ = try writer.writeByte(':');
+                    try k.value_ptr.*.value.toJsonValue(writer);
                     i += 1;
                     if (i < map.count()) try writer.writeByte(',');
                 }
@@ -151,4 +172,12 @@ pub const Scanner = struct {
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt, args);
     std.process.exit(1);
+}
+
+fn compareKVPair(_: void, lhs: KVPair, rhs: KVPair) bool {
+    return compareStrings({}, lhs.key.string, rhs.key.string);
+}
+
+fn compareStrings(_: void, lhs: []const u8, rhs: []const u8) bool {
+    return std.mem.order(u8, lhs, rhs).compare(std.math.CompareOperator.lt);
 }
