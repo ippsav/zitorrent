@@ -3,7 +3,7 @@ const std = @import("std");
 const ParseResult = struct { value: Value, new_cursor: usize };
 
 pub const KVPair = struct {
-    key: Value,
+    key: []const u8,
     value: Value,
 };
 
@@ -11,7 +11,7 @@ pub const Value = union(enum) {
     string: []const u8,
     int: i64,
     list: []Value,
-    dictionary: std.StringArrayHashMap(KVPair),
+    dictionary: std.StringArrayHashMap(Value),
 
     fn parseValue(gpa: std.mem.Allocator, bytes: []const u8, cursor: usize) !ParseResult {
         switch (bytes[cursor]) {
@@ -27,9 +27,9 @@ pub const Value = union(enum) {
 
     fn parseDictionary(allocator: std.mem.Allocator, bytes: []const u8, cursor: usize) ParseResult {
         var index = cursor + 1;
-        var values_map = std.StringArrayHashMap(KVPair).init(allocator);
+        var values_map = std.StringArrayHashMap(Value).init(allocator);
 
-        var key_value_pairs = std.ArrayList(KVPair).init(allocator);
+        var key_value_pair_array = std.ArrayList(KVPair).init(allocator);
 
         while (bytes[index] != 'e') {
             const key_result = Value.parseString(bytes, index);
@@ -39,20 +39,18 @@ pub const Value = union(enum) {
                 fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
             };
             index = value_result.new_cursor;
-            key_value_pairs.append(.{ .key = key_result.value, .value = value_result.value }) catch {
+            key_value_pair_array.append(.{ .key = key_result.value.string, .value = value_result.value }) catch {
                 fatal("Out of memory, exiting ...", .{});
             };
         }
-
-        var key_value_pairs_slice = key_value_pairs.toOwnedSlice() catch {
+        var key_value_pair_slice = key_value_pair_array.toOwnedSlice() catch {
             fatal("Out of memory, exiting ...", .{});
         };
-        defer allocator.free(key_value_pairs_slice);
-        key_value_pairs.deinit();
+        key_value_pair_array.deinit();
+        std.sort.insertion(KVPair, key_value_pair_slice, {}, compareKeys);
 
-        std.sort.insertion(KVPair, key_value_pairs_slice, {}, compareKVPair);
-        for (key_value_pairs_slice) |entry| {
-            values_map.put(entry.key.string, entry) catch {
+        for (key_value_pair_slice) |entry| {
+            values_map.put(entry.key, entry.value) catch {
                 fatal("Out of memory, exiting ...", .{});
             };
         }
@@ -127,9 +125,9 @@ pub const Value = union(enum) {
                 var i: usize = 0;
                 var map_iterator = map.iterator();
                 while (map_iterator.next()) |k| {
-                    try k.value_ptr.*.key.toJsonValue(writer);
+                    try std.json.stringify(k.key_ptr.*, .{}, writer);
                     _ = try writer.writeByte(':');
-                    try k.value_ptr.*.value.toJsonValue(writer);
+                    try k.value_ptr.*.toJsonValue(writer);
                     i += 1;
                     if (i < map.count()) try writer.writeByte(',');
                 }
@@ -174,10 +172,6 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-fn compareKVPair(_: void, lhs: KVPair, rhs: KVPair) bool {
-    return compareStrings({}, lhs.key.string, rhs.key.string);
-}
-
-fn compareStrings(_: void, lhs: []const u8, rhs: []const u8) bool {
-    return std.mem.order(u8, lhs, rhs).compare(std.math.CompareOperator.lt);
+fn compareKeys(_: void, lhs: KVPair, rhs: KVPair) bool {
+    return std.mem.order(u8, lhs.key, rhs.key).compare(std.math.CompareOperator.lt);
 }
