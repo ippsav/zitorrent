@@ -6,6 +6,7 @@ pub const Value = union(enum) {
     string: []const u8,
     int: i64,
     list: []Value,
+    dictionary: std.StringHashMap(Value),
 
     fn parseValue(gpa: std.mem.Allocator, bytes: []const u8, cursor: usize) !ParseResult {
         switch (bytes[cursor]) {
@@ -14,8 +15,27 @@ pub const Value = union(enum) {
             },
             'i' => return parseAssignedInt(bytes, cursor),
             'l' => return parseList(gpa, bytes, cursor),
+            'd' => return parseDictionary(gpa, bytes, cursor),
             else => return error.InvalidToken,
         }
+    }
+
+    fn parseDictionary(allocator: std.mem.Allocator, bytes: []const u8, cursor: usize) ParseResult {
+        var index = cursor + 1;
+        var values_map = std.StringHashMap(Value).init(allocator);
+        while (bytes[index] != 'e') {
+            const key_result = Value.parseString(bytes, index);
+            index = key_result.new_cursor;
+
+            const value_result = Value.parseValue(allocator, bytes, index) catch {
+                fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
+            };
+            index = value_result.new_cursor;
+            values_map.put(key_result.value.string, value_result.value) catch {
+                fatal("Out of memory, exiting...", .{});
+            };
+        }
+        return .{ .value = .{ .dictionary = values_map }, .new_cursor = index + 1 };
     }
 
     fn parseList(allocator: std.mem.Allocator, bytes: []const u8, cursor: usize) ParseResult {
@@ -79,6 +99,20 @@ pub const Value = union(enum) {
                     if (i != l.len - 1) try writer.writeByte(',');
                 }
                 _ = try writer.writeByte(']');
+            },
+            .dictionary => |map| {
+                _ = try writer.writeByte('{');
+                var map_iterator = map.iterator();
+                var i: usize = 0;
+                while (map_iterator.next()) |v| {
+                    try writer.writeByte('"');
+                    _ = try writer.write(v.key_ptr.*);
+                    _ = try writer.write("\":");
+                    try v.value_ptr.*.toJsonValue(writer);
+                    i += 1;
+                    if (i < map.count()) try writer.writeByte(',');
+                }
+                _ = try writer.writeByte('}');
             },
         }
     }
