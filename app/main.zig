@@ -1,13 +1,19 @@
 const std = @import("std");
 const stdout = std.io.getStdOut().writer();
-const Scanner = @import("./bencoded.zig").Scanner;
-const allocator = std.heap.page_allocator;
+// const Scanner = @import("./bencoded.zig").Scanner;
+const bencoded = @import("./bencoded.zig");
+const assert = std.debug.assert;
 
 const Command = enum {
     decode,
 };
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 100 }){};
+    defer {
+        assert(gpa.deinit() == .ok);
+    }
+    var allocator = gpa.allocator();
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     if (args.len < 3) {
@@ -20,10 +26,15 @@ pub fn main() !void {
 
     switch (command) {
         .decode => {
-            var bencoded_scanner = Scanner.initWithCompleteInput(allocator, args[2]);
-            while (bencoded_scanner.next()) |v| {
-                try stdout.print("{}\n", .{v});
-            }
+            // var bencoded_scanner = Scanner.initWithCompleteInput(allocator, args[2]);
+            // while (bencoded_scanner.next()) |v| {
+            //     try stdout.print("{}\n", .{v});
+            //     v.deinit(allocator);
+            //}
+            var index: usize = 0;
+            var v = try bencoded.decode(allocator, &index, args[2]);
+            try stdout.print("{}\n", .{v});
+            v.deinit(allocator);
         },
     }
 }
