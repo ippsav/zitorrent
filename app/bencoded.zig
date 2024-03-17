@@ -89,8 +89,8 @@ pub const Value = union(enum) {
                 fatal("Out of memory, exiting...", .{});
             };
         }
-        const number = std.fmt.parseInt(i32, buffer.items, 10) catch {
-            fatal("Error parsing number, got: {s}\n", .{buffer.items});
+        const number = std.fmt.parseInt(i64, buffer.items, 10) catch |err| {
+            fatal("Error parsing number, got: {s}\n{any}", .{ buffer.items, err });
         };
 
         return .{ .int = number };
