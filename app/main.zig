@@ -4,9 +4,7 @@ const stdout = std.io.getStdOut().writer();
 const bencoded = @import("./bencoded.zig");
 const assert = std.debug.assert;
 
-const Command = enum {
-    decode,
-};
+const Command = enum { decode, info };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 100 }){};
@@ -26,15 +24,22 @@ pub fn main() !void {
 
     switch (command) {
         .decode => {
-            // var bencoded_scanner = Scanner.initWithCompleteInput(allocator, args[2]);
-            // while (bencoded_scanner.next()) |v| {
-            //     try stdout.print("{}\n", .{v});
-            //     v.deinit(allocator);
-            //}
-            var index: usize = 0;
-            var v = try bencoded.decode(allocator, &index, args[2]);
-            try stdout.print("{}\n", .{v});
-            v.deinit(allocator);
+            var fixed_buffer_stream = std.io.fixedBufferStream(args[2]);
+            var peek_stream = std.io.peekStream(1, fixed_buffer_stream.reader());
+            var value = try bencoded.decodeFromStream(allocator, &peek_stream);
+            std.debug.print("{}\n", .{value});
+            value.deinit(allocator);
+        },
+        .info => {
+            const path = args[2];
+            var file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
+            defer file.close();
+
+            var peek_stream = std.io.peekStream(1, file.reader());
+
+            var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
+            std.debug.print("{}\n", .{decoded_content});
+            decoded_content.deinit(allocator);
         },
     }
 }

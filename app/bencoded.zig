@@ -14,120 +14,170 @@ pub const Value = union(enum) {
     pub fn deinit(self: *Value, allocator: std.mem.Allocator) void {
         switch (self.*) {
             .dictionary => {
-                for (self.dictionary.values()) |*map_value| {
-                    switch (map_value.*) {
-                        .list => {
-                            allocator.free(map_value.list);
-                        },
-                        .dictionary => {
-                            map_value.deinit(allocator);
-                        },
-                        else => {},
-                    }
+                const dictionary_iterator = self.dictionary.iterator();
+                for (0..dictionary_iterator.len) |i| {
+                    dictionary_iterator.values[i].deinit(allocator);
+                    allocator.free(dictionary_iterator.keys[i]);
                 }
                 self.*.dictionary.deinit();
             },
             .list => {
+                for (self.list) |*value| {
+                    value.deinit(allocator);
+                }
                 allocator.free(self.list);
+            },
+            .string => {
+                allocator.free(self.string);
             },
             else => {},
         }
     }
 
-    fn parseValue(gpa: std.mem.Allocator, cursor: *usize, bytes: []const u8) !Value {
-        switch (bytes[cursor.*]) {
+    fn parseValueFromStream(gpa: std.mem.Allocator, peek_stream: anytype) !Value {
+        var reader = peek_stream.reader();
+        const first_byte = try reader.readByte();
+        switch (first_byte) {
             '0'...'9' => {
-                return parseString(cursor, bytes);
+                try peek_stream.putBackByte(first_byte);
+                return parseStringFromStream(gpa, peek_stream);
             },
-            'i' => return parseAssignedInt(cursor, bytes),
-            'l' => return parseList(gpa, cursor, bytes),
-            'd' => return parseDictionary(gpa, cursor, bytes),
+            'i' => {
+                return parseAssignedIntFromStream(gpa, peek_stream);
+            },
+            'l' => {
+                return parseListFromStream(gpa, peek_stream);
+            },
+            'd' => {
+                return parseDictionaryFromStream(gpa, peek_stream);
+            },
             else => return error.InvalidToken,
         }
     }
 
-    fn parseDictionary(allocator: std.mem.Allocator, cursor: *usize, bytes: []const u8) Value {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        var arena_allocator = arena.allocator();
-        defer arena.deinit();
+    fn parseStringFromStream(gpa: std.mem.Allocator, peek_stream: anytype) Value {
+        var reader = peek_stream.reader();
+        var bytes_till_delimiter: []const u8 = reader.readUntilDelimiterAlloc(gpa, ':', 4096) catch {
+            fatal("Out of memory, exiting...", .{});
+        };
 
-        var index = cursor.* + 1;
-        var values_map = std.StringArrayHashMap(Value).init(allocator);
+        const string_len = std.fmt.parseInt(usize, bytes_till_delimiter, 10) catch {
+            fatal("Error parsing string length\n", .{});
+        };
 
-        var key_value_pair_array = std.ArrayList(KVPair).init(arena_allocator);
+        gpa.free(bytes_till_delimiter);
 
-        while (bytes[index] != 'e') {
-            const key = Value.parseString(&index, bytes);
+        var string = gpa.alloc(u8, string_len) catch {
+            fatal("Out of memory, exiting...\n", .{});
+        };
 
-            const value = Value.parseValue(allocator, &index, bytes) catch {
-                fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
-            };
+        _ = reader.read(string) catch {
+            fatal("Error reading from memory, exiting...\n", .{});
+        };
 
-            key_value_pair_array.append(.{ .key = key.string, .value = value }) catch {
-                fatal("Out of memory, exiting ...", .{});
-            };
-        }
-        // var key_value_pair_slice = key_value_pair_array.toOwnedSlice() catch {
-        //     fatal("Out of memory, exiting ...", .{});
-        // };
-
-        std.sort.insertion(KVPair, key_value_pair_array.items, {}, compareKeys);
-
-        for (key_value_pair_array.items) |entry| {
-            values_map.put(entry.key, entry.value) catch {
-                fatal("Out of memory, exiting ...", .{});
-            };
-        }
-
-        cursor.* = index + 1;
-        return .{ .dictionary = values_map };
+        return .{ .string = string };
     }
 
-    fn parseList(allocator: std.mem.Allocator, cursor: *usize, bytes: []const u8) Value {
-        var index = cursor.* + 1;
-        var values_list = std.ArrayList(Value).init(allocator);
+    fn parseAssignedIntFromStream(gpa: std.mem.Allocator, peek_stream: anytype) Value {
+        var buffer = std.ArrayList(u8).init(gpa);
+        defer buffer.deinit();
+        var reader = peek_stream.reader();
+
+        while (true) {
+            const byte = reader.readByte() catch {
+                fatal("End of stream, exiting...", .{});
+            };
+            if (byte == 'e') {
+                break;
+            }
+            buffer.append(byte) catch {
+                fatal("Out of memory, exiting...", .{});
+            };
+        }
+        const number = std.fmt.parseInt(i32, buffer.items, 10) catch {
+            fatal("Error parsing number, got: {s}\n", .{buffer.items});
+        };
+
+        return .{ .int = number };
+    }
+
+    fn parseListFromStream(gpa: std.mem.Allocator, peek_stream: anytype) Value {
+        var values_list = std.ArrayList(Value).init(gpa);
         defer values_list.deinit();
-        while (bytes[index] != 'e') {
-            const value = Value.parseValue(allocator, &index, bytes) catch {
-                fatal("Error parsing list {c} in {s}\n", .{ bytes[index], bytes[index..] });
+        var reader = peek_stream.reader();
+
+        while (true) {
+            const byte = reader.readByte() catch {
+                fatal("End of stream, exiting...", .{});
+            };
+            if (byte == 'e') {
+                break;
+            }
+            peek_stream.putBackByte(byte) catch {
+                fatal("Out of memory, exiting...", .{});
+            };
+
+            const value = parseValueFromStream(gpa, peek_stream) catch |err| {
+                fatal("Error parsing value, {any}", .{err});
             };
             values_list.append(value) catch {
                 fatal("Out of memory, exiting...", .{});
             };
         }
-        const list = values_list.toOwnedSlice() catch {
-            fatal("Boom", .{});
+        var values_slice = values_list.toOwnedSlice() catch {
+            fatal("Out of memory, exiting...", .{});
         };
-        cursor.* = index + 1;
-        return .{ .list = list };
+        return .{ .list = values_slice };
     }
 
-    fn parseString(cursor: *usize, bytes: []const u8) Value {
-        var delimiter_index: usize = undefined;
-        if (std.mem.indexOfScalar(u8, bytes[cursor.*..], ':')) |v| {
-            delimiter_index = v + cursor.*;
-        } else {
-            fatal("Error parsing string missing delimiter ':'", .{});
-        }
-        const string_len = std.fmt.parseInt(usize, bytes[cursor.*..delimiter_index], 10) catch {
-            fatal("Error parsing string length", .{});
-        };
-        cursor.* = delimiter_index + string_len + 1;
-        return .{ .string = bytes[delimiter_index + 1 .. delimiter_index + string_len + 1] };
-    }
+    fn parseDictionaryFromStream(gpa: std.mem.Allocator, peek_stream: anytype) Value {
+        var reader = peek_stream.reader();
+        var values_map = std.StringArrayHashMap(Value).init(gpa);
 
-    fn parseAssignedInt(cursor: *usize, bytes: []const u8) Value {
-        const number_length = blk: {
-            const e_tag_index = std.mem.indexOfScalar(u8, bytes[cursor.*..], 'e') orelse {
-                break :blk fatal("Error parsing integer, missing end (e)", .{});
+        while (true) {
+            const byte = reader.readByte() catch {
+                fatal("End of stream, exiting...\n", .{});
             };
-            break :blk e_tag_index - 1;
+
+            if (byte == 'e') {
+                break;
+            }
+
+            peek_stream.putBackByte(byte) catch {
+                fatal("Out of memory, exiting...\n", .{});
+            };
+
+            var key = Value.parseStringFromStream(gpa, peek_stream);
+            const value = Value.parseValueFromStream(gpa, peek_stream) catch {
+                fatal("Error parsing value\n", .{});
+            };
+
+            const key_copy = gpa.alloc(u8, key.string.len) catch {
+                fatal("Out of memory, exiting...\n", .{});
+            };
+
+            std.mem.copy(u8, key_copy, key.string);
+
+            key.deinit(gpa);
+
+            values_map.put(key_copy, value) catch {
+                fatal("Out of memory, exiting...\n", .{});
+            };
+        }
+
+        const SortCtx = struct {
+            keys: [][]const u8,
+
+            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                return std.mem.order(u8, ctx.keys[a_index], ctx.keys[b_index]).compare(std.math.CompareOperator.lt);
+            }
         };
-        const parsedNumber = std.fmt.parseInt(i64, bytes[cursor.* + 1 .. cursor.* + 1 + number_length], 10) catch {
-            fatal("Error parsing integer: {s}", .{bytes[cursor.* + 1 .. cursor.* + 1 + number_length]});
-        };
-        cursor.* = cursor.* + number_length + 2;
-        return .{ .int = parsedNumber };
+
+        const sort_ctx = SortCtx{ .keys = values_map.keys() };
+
+        values_map.sort(sort_ctx);
+
+        return .{ .dictionary = values_map };
     }
 
     pub fn toJsonValue(self: Value, writer: anytype) !void {
@@ -168,33 +218,8 @@ pub const Value = union(enum) {
     }
 };
 
-// pub const Scanner = struct {
-//     gpa: std.mem.Allocator,
-//
-//     input: []const u8 = "",
-//     cursor: usize = 0,
-//
-//     pub fn initWithCompleteInput(allocator: std.mem.Allocator, complete_input: []const u8) Scanner {
-//         return Scanner{
-//             .input = complete_input,
-//             .gpa = allocator,
-//         };
-//     }
-//
-//     pub fn next(self: *Scanner) ?Value {
-//         if (self.cursor >= self.input.len - 1) {
-//             return null;
-//         }
-//         var parse_result = Value.parseValue(self.gpa, self.input, self.cursor) catch {
-//             fatal("error parsing at {d}\n", .{self.cursor});
-//         };
-//         self.cursor = parse_result.new_cursor;
-//         return parse_result.value;
-//     }
-// };
-
-pub fn decode(allocator: std.mem.Allocator, cursor: *usize, bytes: []const u8) !Value {
-    return try Value.parseValue(allocator, cursor, bytes);
+pub fn decodeFromStream(gpa: std.mem.Allocator, peek_stream: anytype) !Value {
+    return try Value.parseValueFromStream(gpa, peek_stream);
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -204,4 +229,122 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 
 fn compareKeys(_: void, lhs: KVPair, rhs: KVPair) bool {
     return std.mem.order(u8, lhs.key, rhs.key).compare(std.math.CompareOperator.lt);
+}
+
+fn compareValues(lhs: Value, rhs: Value) !void {
+    const activeTag = std.meta.activeTag;
+    std.debug.assert(activeTag(lhs) == activeTag(rhs));
+
+    switch (lhs) {
+        .string => |v| {
+            try std.testing.expectEqualStrings(v, rhs.string);
+        },
+        .int => |v| {
+            try std.testing.expectEqual(v, rhs.int);
+        },
+        .list => |l| {
+            for (l, rhs.list) |v1, v2| {
+                try compareValues(v1, v2);
+            }
+        },
+        .dictionary => |d| {
+            var lhs_iterator = d.iterator();
+            var rhs_iterator = rhs.dictionary.iterator();
+            for (0..lhs_iterator.len, 0..rhs_iterator.len) |i, j| {
+                try std.testing.expectEqualStrings(lhs_iterator.keys[i], rhs_iterator.keys[j]);
+                try compareValues(lhs_iterator.values[i], rhs_iterator.values[j]);
+            }
+        },
+    }
+}
+
+test "parse string value from stream" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+    defer {
+        std.debug.assert(gpa.deinit() == .ok);
+    }
+    var fbs = std.io.fixedBufferStream("5:hello");
+    var peek_stream = std.io.peekStream(1, fbs.reader());
+
+    var value = Value.parseStringFromStream(allocator, &peek_stream);
+
+    defer value.deinit(allocator);
+
+    try compareValues(value, .{ .string = "hello" });
+}
+
+test "parse int value from stream" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+    defer {
+        std.debug.assert(gpa.deinit() == .ok);
+    }
+    var fbs = std.io.fixedBufferStream("i52e");
+    var peek_stream = std.io.peekStream(1, fbs.reader());
+
+    _ = try peek_stream.reader().readByte();
+
+    var value = Value.parseAssignedIntFromStream(allocator, &peek_stream);
+
+    defer value.deinit(allocator);
+    errdefer value.deinit(allocator);
+
+    try compareValues(value, .{ .int = 52 });
+}
+
+test "parse list of values from stream" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+    defer {
+        std.debug.assert(gpa.deinit() == .ok);
+    }
+
+    var fbs = std.io.fixedBufferStream("l5:helloi32ee");
+    var peek_stream = std.io.peekStream(1, fbs.reader());
+
+    _ = try peek_stream.reader().readByte();
+
+    var value_list = Value.parseListFromStream(allocator, &peek_stream);
+
+    var expected_list_values: [2]Value = .{ .{ .string = "hello" }, .{ .int = 32 } };
+
+    var expected_list: Value = .{ .list = &expected_list_values };
+
+    defer value_list.deinit(allocator);
+
+    try compareValues(value_list, expected_list);
+}
+
+test "parse dictionary of values from stream" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+    defer {
+        std.debug.assert(gpa.deinit() == .ok);
+    }
+
+    // foo : bar , hello : 52 , bar : [ "hello" , 53 ]
+    var fbs = std.io.fixedBufferStream("d3:foo3:bar5:helloi52e3:barl5:helloi53eee");
+    var peek_stream = std.io.peekStream(1, fbs.reader());
+
+    _ = try peek_stream.reader().readByte();
+
+    var list_values: [2]Value = .{ .{ .string = "hello" }, .{ .int = 53 } };
+
+    var values: [3]Value = .{ .{ .list = &list_values }, .{ .string = "bar" }, .{ .int = 52 } };
+    var keys: [3][]const u8 = .{ "bar", "foo", "hello" };
+
+    var expected_hash_map: std.StringArrayHashMap(Value) = std.StringArrayHashMap(Value).init(allocator);
+    defer expected_hash_map.deinit();
+
+    for (0..keys.len) |i| {
+        try expected_hash_map.put(keys[i], values[i]);
+    }
+
+    var expected_dictionary_value: Value = .{ .dictionary = expected_hash_map };
+
+    var dictionary_value = Value.parseDictionaryFromStream(allocator, &peek_stream);
+    defer dictionary_value.deinit(allocator);
+
+    try compareValues(dictionary_value, expected_dictionary_value);
 }
