@@ -1,10 +1,5 @@
 const std = @import("std");
 
-pub const KVPair = struct {
-    key: []const u8,
-    value: Value,
-};
-
 pub const Value = union(enum) {
     string: []const u8,
     int: i64,
@@ -152,28 +147,20 @@ pub const Value = union(enum) {
                 fatal("Error parsing value\n", .{});
             };
 
-            const key_copy = gpa.alloc(u8, key.string.len) catch {
-                fatal("Out of memory, exiting...\n", .{});
-            };
-
-            std.mem.copy(u8, key_copy, key.string);
-
-            key.deinit(gpa);
-
-            values_map.put(key_copy, value) catch {
+            values_map.put(key.string, value) catch {
                 fatal("Out of memory, exiting...\n", .{});
             };
         }
 
         const SortCtx = struct {
-            keys: [][]const u8,
+            map: std.StringArrayHashMap(Value),
 
             pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                return std.mem.order(u8, ctx.keys[a_index], ctx.keys[b_index]).compare(std.math.CompareOperator.lt);
+                return std.mem.order(u8, ctx.map.keys()[a_index], ctx.map.keys()[b_index]).compare(std.math.CompareOperator.lt);
             }
         };
 
-        const sort_ctx = SortCtx{ .keys = values_map.keys() };
+        const sort_ctx = SortCtx{ .map = values_map };
 
         values_map.sort(sort_ctx);
 
@@ -225,10 +212,6 @@ pub fn decodeFromStream(gpa: std.mem.Allocator, peek_stream: anytype) !Value {
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt, args);
     std.process.exit(1);
-}
-
-fn compareKeys(_: void, lhs: KVPair, rhs: KVPair) bool {
-    return std.mem.order(u8, lhs.key, rhs.key).compare(std.math.CompareOperator.lt);
 }
 
 fn compareValues(lhs: Value, rhs: Value) !void {

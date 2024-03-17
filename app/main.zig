@@ -2,6 +2,7 @@ const std = @import("std");
 const stdout = std.io.getStdOut().writer();
 // const Scanner = @import("./bencoded.zig").Scanner;
 const bencoded = @import("./bencoded.zig");
+const TorrentMetadata = @import("torrent.zig").TorrentMetadata;
 const assert = std.debug.assert;
 
 const Command = enum { decode, info };
@@ -27,7 +28,7 @@ pub fn main() !void {
             var fixed_buffer_stream = std.io.fixedBufferStream(args[2]);
             var peek_stream = std.io.peekStream(1, fixed_buffer_stream.reader());
             var value = try bencoded.decodeFromStream(allocator, &peek_stream);
-            std.debug.print("{}\n", .{value});
+            try stdout.print("{}\n", .{value});
             value.deinit(allocator);
         },
         .info => {
@@ -38,8 +39,14 @@ pub fn main() !void {
             var peek_stream = std.io.peekStream(1, file.reader());
 
             var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
-            std.debug.print("{}\n", .{decoded_content});
-            decoded_content.deinit(allocator);
+            defer decoded_content.deinit(allocator);
+
+            const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
+            try stdout.print(
+                \\Tracker URL: {s}
+                \\Length: {d}
+                \\
+            , .{ torrent_meta_data.announce, torrent_meta_data.info.length });
         },
     }
 }
