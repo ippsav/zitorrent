@@ -7,15 +7,19 @@ pub const TorrentInfo = struct {
     piece_length: usize,
     pieces: []const u8,
 
-    pub fn getInfoHash(self: @This(), gpa: std.mem.Allocator) ![std.crypto.hash.Sha1.digest_length]u8 {
-        var encoded_data = std.ArrayList(u8).init(gpa);
-        defer encoded_data.deinit();
-        try bencoded.encodeValue(self, encoded_data.writer());
-
-        var hash_buffer: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
-        std.crypto.hash.Sha1.hash(encoded_data.items, &hash_buffer, .{});
-
-        return hash_buffer;
+    pub fn getInfoHash(self: @This()) ![std.crypto.hash.Sha1.digest_length]u8 {
+        var hasher = std.crypto.hash.Sha1.init(.{});
+        try hasher.writer().writeByte('d');
+        try bencoded.encodeValue(.{ .string = "length" }, hasher.writer());
+        try bencoded.encodeValue(.{ .int = @intCast(self.length) }, hasher.writer());
+        try bencoded.encodeValue(.{ .string = "name" }, hasher.writer());
+        try bencoded.encodeValue(.{ .string = self.name }, hasher.writer());
+        try bencoded.encodeValue(.{ .string = "piece_length" }, hasher.writer());
+        try bencoded.encodeValue(.{ .int = @intCast(self.piece_length) }, hasher.writer());
+        try bencoded.encodeValue(.{ .string = "pieces" }, hasher.writer());
+        try bencoded.encodeValue(.{ .string = self.pieces }, hasher.writer());
+        try hasher.writer().writeByte('e');
+        return hasher.finalResult();
     }
 };
 
@@ -24,11 +28,11 @@ pub const TorrentMetadata = struct {
     info: TorrentInfo,
 
     pub fn getTorrentMetadata(torrent_data: bencoded.Value) !TorrentMetadata {
-        std.debug.assert(std.meta.activeTag(torrent_data) == .dictionary);
+        std.debug.assert(torrent_data == .dictionary);
         const info_map: bencoded.Value = torrent_data.dictionary.get("info") orelse {
             fatal("Error missing info in torrent metadata\n", .{});
         };
-        std.debug.assert(std.meta.activeTag(info_map) == .dictionary);
+        std.debug.assert(info_map == .dictionary);
 
         const announce: []const u8 = torrent_data.dictionary.get("announce").?.string;
 
