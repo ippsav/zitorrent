@@ -193,7 +193,7 @@ pub const Value = union(enum) {
                     _ = try writer.writeByte(':');
                     try k.value_ptr.*.toJsonValue(writer);
                     i += 1;
-                    if (i < map.count() - 1) try writer.writeByte(',');
+                    if (i < map.count()) try writer.writeByte(',');
                 }
                 _ = try writer.writeByte('}');
             },
