@@ -222,7 +222,7 @@ fn encodeStringArrayHashMap(map: std.StringArrayHashMap(Value), writer: anytype)
     try writer.writeByte('d');
     var iterator = map.iterator();
     while (iterator.next()) |entry| {
-        try encodeValue(entry.key_ptr.*, writer);
+        try encodeValue(.{ .string = entry.key_ptr.* }, writer);
         try encodeValue(entry.value_ptr.*, writer);
     }
     try writer.writeByte('e');
@@ -237,7 +237,16 @@ fn encodeStruct(comptime struct_info: std.builtin.Type.Struct, value: anytype, w
     try writer.writeByte('e');
 }
 
-pub fn encodeValue(value: anytype, writer: anytype) @TypeOf(writer).Error!void {
+pub fn encodeValue(value: Value, writer: anytype) @TypeOf(writer).Error!void {
+    switch (value) {
+        .string => |s| try writer.print("{d}:{s}", .{ s.len, s }),
+        .int => |i| try writer.print("i{d}e", .{i}),
+        .list => |l| try encodeListValue(l, writer),
+        .dictionary => |m| try encodeStringArrayHashMap(m, writer),
+    }
+}
+
+pub fn encodeValue2(value: anytype, writer: anytype) @TypeOf(writer).Error!void {
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
         .Pointer => |ptr_info| {

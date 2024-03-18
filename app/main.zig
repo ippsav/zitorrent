@@ -43,13 +43,27 @@ pub fn main() !void {
             defer decoded_content.deinit(allocator);
 
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
-            const hash = try torrent_meta_data.info.getInfoHash(allocator);
+
+            const hash2 = try torrent_meta_data.info.getInfoHash();
+            const info_map: bencoded.Value = decoded_content.dictionary.get("info") orelse {
+                fatal("Error missing info in torrent metadata\n", .{});
+            };
+            var hasher = std.crypto.hash.Sha1.init(.{});
+            try bencoded.encodeValue(info_map, hasher.writer());
+            const hash = hasher.finalResult();
+
             try stdout.print(
                 \\Tracker URL: {s}
                 \\Length: {d}
                 \\Info Hash: {s}
+                \\Info Hash2: {s}
                 \\
-            , .{ torrent_meta_data.announce, torrent_meta_data.info.length, std.fmt.fmtSliceHexLower(&hash) });
+            , .{
+                torrent_meta_data.announce,
+                torrent_meta_data.info.length,
+                std.fmt.fmtSliceHexLower(&hash),
+                std.fmt.fmtSliceHexLower(&hash2),
+            });
         },
     }
 }
