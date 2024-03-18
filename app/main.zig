@@ -43,7 +43,7 @@ pub fn main() !void {
             defer decoded_content.deinit(allocator);
 
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
-            const hash = try torrent_meta_data.info.getInfoHash(allocator);
+            const hash = try torrent_meta_data.info.getInfoHash();
             try stdout.print(
                 \\Tracker URL: {s}
                 \\Length: {d}
