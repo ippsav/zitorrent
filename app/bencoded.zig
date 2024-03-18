@@ -228,7 +228,7 @@ fn encodeStringArrayHashMap(map: std.StringArrayHashMap(Value), writer: anytype)
     try writer.writeByte('e');
 }
 
-fn encodeStruct(struct_info: std.builtin.Type.Struct, value: anytype, writer: anytype) !void {
+fn encodeStruct(comptime struct_info: std.builtin.Type.Struct, value: anytype, writer: anytype) !void {
     try writer.writeByte('d');
     inline for (struct_info.fields) |field| {
         try encodeValue(field.name, writer);
