@@ -1,4 +1,5 @@
 const std = @import("std");
+const peekStream = @import("peek_stream.zig").peekStream;
 
 pub const Value = union(enum) {
     string: []const u8,
@@ -52,7 +53,7 @@ pub const Value = union(enum) {
 
     fn parseStringFromStream(gpa: std.mem.Allocator, peek_stream: anytype) Value {
         var reader = peek_stream.reader();
-        var bytes_till_delimiter: []const u8 = reader.readUntilDelimiterAlloc(gpa, ':', 4096) catch {
+        const bytes_till_delimiter: []const u8 = reader.readUntilDelimiterAlloc(gpa, ':', 4096) catch {
             fatal("Out of memory, exiting...", .{});
         };
 
@@ -62,7 +63,7 @@ pub const Value = union(enum) {
 
         gpa.free(bytes_till_delimiter);
 
-        var string = gpa.alloc(u8, string_len) catch {
+        const string = gpa.alloc(u8, string_len) catch {
             fatal("Out of memory, exiting...\n", .{});
         };
 
@@ -119,7 +120,7 @@ pub const Value = union(enum) {
                 fatal("Out of memory, exiting...", .{});
             };
         }
-        var values_slice = values_list.toOwnedSlice() catch {
+        const values_slice = values_list.toOwnedSlice() catch {
             fatal("Out of memory, exiting...", .{});
         };
         return .{ .list = values_slice };
@@ -142,7 +143,7 @@ pub const Value = union(enum) {
                 fatal("Out of memory, exiting...\n", .{});
             };
 
-            var key = Value.parseStringFromStream(gpa, peek_stream);
+            const key = Value.parseStringFromStream(gpa, peek_stream);
             const value = Value.parseValueFromStream(gpa, peek_stream) catch {
                 fatal("Error parsing value\n", .{});
             };
@@ -231,8 +232,8 @@ fn compareValues(lhs: Value, rhs: Value) !void {
             }
         },
         .dictionary => |d| {
-            var lhs_iterator = d.iterator();
-            var rhs_iterator = rhs.dictionary.iterator();
+            const lhs_iterator = d.iterator();
+            const rhs_iterator = rhs.dictionary.iterator();
             for (0..lhs_iterator.len, 0..rhs_iterator.len) |i, j| {
                 try std.testing.expectEqualStrings(lhs_iterator.keys[i], rhs_iterator.keys[j]);
                 try compareValues(lhs_iterator.values[i], rhs_iterator.values[j]);
@@ -243,12 +244,12 @@ fn compareValues(lhs: Value, rhs: Value) !void {
 
 test "parse string value from stream" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
     defer {
         std.debug.assert(gpa.deinit() == .ok);
     }
     var fbs = std.io.fixedBufferStream("5:hello");
-    var peek_stream = std.io.peekStream(1, fbs.reader());
+    var peek_stream = peekStream(1, fbs.reader());
 
     var value = Value.parseStringFromStream(allocator, &peek_stream);
 
@@ -259,12 +260,12 @@ test "parse string value from stream" {
 
 test "parse int value from stream" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
     defer {
         std.debug.assert(gpa.deinit() == .ok);
     }
     var fbs = std.io.fixedBufferStream("i52e");
-    var peek_stream = std.io.peekStream(1, fbs.reader());
+    var peek_stream = peekStream(1, fbs.reader());
 
     _ = try peek_stream.reader().readByte();
 
@@ -278,13 +279,13 @@ test "parse int value from stream" {
 
 test "parse list of values from stream" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
     defer {
         std.debug.assert(gpa.deinit() == .ok);
     }
 
     var fbs = std.io.fixedBufferStream("l5:helloi32ee");
-    var peek_stream = std.io.peekStream(1, fbs.reader());
+    var peek_stream = peekStream(1, fbs.reader());
 
     _ = try peek_stream.reader().readByte();
 
@@ -292,7 +293,7 @@ test "parse list of values from stream" {
 
     var expected_list_values: [2]Value = .{ .{ .string = "hello" }, .{ .int = 32 } };
 
-    var expected_list: Value = .{ .list = &expected_list_values };
+    const expected_list: Value = .{ .list = &expected_list_values };
 
     defer value_list.deinit(allocator);
 
@@ -301,21 +302,21 @@ test "parse list of values from stream" {
 
 test "parse dictionary of values from stream" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
     defer {
         std.debug.assert(gpa.deinit() == .ok);
     }
 
     // foo : bar , hello : 52 , bar : [ "hello" , 53 ]
     var fbs = std.io.fixedBufferStream("d3:foo3:bar5:helloi52e3:barl5:helloi53eee");
-    var peek_stream = std.io.peekStream(1, fbs.reader());
+    var peek_stream = peekStream(1, fbs.reader());
 
     _ = try peek_stream.reader().readByte();
 
     var list_values: [2]Value = .{ .{ .string = "hello" }, .{ .int = 53 } };
 
-    var values: [3]Value = .{ .{ .list = &list_values }, .{ .string = "bar" }, .{ .int = 52 } };
-    var keys: [3][]const u8 = .{ "bar", "foo", "hello" };
+    const values: [3]Value = .{ .{ .list = &list_values }, .{ .string = "bar" }, .{ .int = 52 } };
+    const keys: [3][]const u8 = .{ "bar", "foo", "hello" };
 
     var expected_hash_map: std.StringArrayHashMap(Value) = std.StringArrayHashMap(Value).init(allocator);
     defer expected_hash_map.deinit();
@@ -324,7 +325,7 @@ test "parse dictionary of values from stream" {
         try expected_hash_map.put(keys[i], values[i]);
     }
 
-    var expected_dictionary_value: Value = .{ .dictionary = expected_hash_map };
+    const expected_dictionary_value: Value = .{ .dictionary = expected_hash_map };
 
     var dictionary_value = Value.parseDictionaryFromStream(allocator, &peek_stream);
     defer dictionary_value.deinit(allocator);
