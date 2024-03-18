@@ -43,11 +43,13 @@ pub fn main() !void {
             defer decoded_content.deinit(allocator);
 
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
+            const hash = try torrent_meta_data.info.getInfoHash(allocator);
             try stdout.print(
                 \\Tracker URL: {s}
                 \\Length: {d}
+                \\Info Hash: {s}
                 \\
-            , .{ torrent_meta_data.announce, torrent_meta_data.info.length });
+            , .{ torrent_meta_data.announce, torrent_meta_data.info.length, std.fmt.fmtSliceHexLower(&hash) });
         },
     }
 }

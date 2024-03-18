@@ -193,7 +193,7 @@ pub const Value = union(enum) {
                     _ = try writer.writeByte(':');
                     try k.value_ptr.*.toJsonValue(writer);
                     i += 1;
-                    if (i < map.count()) try writer.writeByte(',');
+                    if (i < map.count() - 1) try writer.writeByte(',');
                 }
                 _ = try writer.writeByte('}');
             },
@@ -208,6 +208,66 @@ pub const Value = union(enum) {
 
 pub fn decodeFromStream(gpa: std.mem.Allocator, peek_stream: anytype) !Value {
     return try Value.parseValueFromStream(gpa, peek_stream);
+}
+
+fn encodeListValue(value_list: []const Value, writer: anytype) !void {
+    try writer.writeByte('l');
+    for (value_list) |v| {
+        try encodeValue(v, writer);
+    }
+    try writer.writeByte('e');
+}
+
+fn encodeStringArrayHashMap(map: std.StringArrayHashMap(Value), writer: anytype) !void {
+    try writer.writeByte('d');
+    var iterator = map.iterator();
+    while (iterator.next()) |entry| {
+        try encodeValue(entry.key_ptr.*, writer);
+        try encodeValue(entry.value_ptr.*, writer);
+    }
+    try writer.writeByte('e');
+}
+
+fn encodeStruct(struct_info: std.builtin.Type.Struct, value: anytype, writer: anytype) !void {
+    try writer.writeByte('d');
+    inline for (struct_info.fields) |field| {
+        try encodeValue(field.name, writer);
+        try encodeValue(@field(value, field.name), writer);
+    }
+    try writer.writeByte('e');
+}
+
+pub fn encodeValue(value: anytype, writer: anytype) @TypeOf(writer).Error!void {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .Pointer => |ptr_info| {
+            switch (ptr_info.size) {
+                .Slice => switch (ptr_info.child) {
+                    u8 => try writer.print("{d}:{s}", .{ value.len, value }),
+                    Value => try encodeListValue(value, writer),
+                    else => @compileError("invalid type " ++ @typeName(T)),
+                },
+                else => @compileError("invalid type " ++ @typeName(T)),
+            }
+        },
+        .Int, .ComptimeInt => try writer.print("i{d}e", .{value}),
+        .Struct => |s| switch (T) {
+            std.StringArrayHashMap(Value) => try encodeStringArrayHashMap(value, writer),
+            else => try encodeStruct(s, value, writer),
+        },
+        .Union => {
+            switch (T) {
+                Value => switch (value) {
+                    .string => |s| try writer.print("{d}:{s}", .{ s.len, s }),
+                    .int => |d| try writer.print("i{d}e", .{d}),
+                    .list => |l| try encodeListValue(l, writer),
+                    .dictionary => |m| try encodeStringArrayHashMap(m, writer),
+                },
+                else => @compileError("invalid type " ++ @typeName(T)),
+            }
+        },
+        else => @compileError("invalid type " ++ @typeName(T)),
+    }
 }
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
@@ -332,3 +392,45 @@ test "parse dictionary of values from stream" {
 
     try compareValues(dictionary_value, expected_dictionary_value);
 }
+
+test "encode string value" {
+    const decoded_value: []const u8 = "hello";
+
+    var out: [7]u8 = undefined;
+
+    var fbs = std.io.fixedBufferStream(&out);
+
+    const expected: []const u8 = "5:hello";
+
+    try encodeValue(decoded_value, fbs.writer());
+
+    try std.testing.expectEqualStrings(expected, &out);
+}
+
+test "encode int64 value" {
+    const decoded_value: i64 = 52;
+
+    var out: [4]u8 = undefined;
+
+    var fbs = std.io.fixedBufferStream(&out);
+
+    const expected: []const u8 = "i52e";
+
+    try encodeValue(decoded_value, fbs.writer());
+
+    try std.testing.expectEqualStrings(expected, &out);
+}
+
+// test "encode list of values" {
+//     const decoded_value: [2]Value = .{ .{ .int = 64 }, .{ .string = "hello" } };
+//
+//     var out: [13]u8 = undefined;
+//
+//     var fbs = std.io.fixedBufferStream(&out);
+//
+//     const expected: []const u8 = "li64e5:helloe";
+//
+//     try encodeValue(&decoded_value, fbs.writer());
+//
+//     try std.testing.expectEqualStrings(expected, &out);
+// }

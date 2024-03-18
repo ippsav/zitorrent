@@ -1,7 +1,23 @@
 const std = @import("std");
 const bencoded = @import("bencoded.zig");
 
-pub const TorrentInfo = struct { length: usize, name: []const u8, piece_length: usize, pieces: []const u8 };
+pub const TorrentInfo = struct {
+    length: usize,
+    name: []const u8,
+    piece_length: usize,
+    pieces: []const u8,
+
+    pub fn getInfoHash(self: @This(), gpa: std.mem.Allocator) ![std.crypto.hash.Sha1.digest_length]u8 {
+        var encoded_data = std.ArrayList(u8).init(gpa);
+        defer encoded_data.deinit();
+        try bencoded.encodeValue(self, encoded_data.writer());
+
+        var hash_buffer: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+        std.crypto.hash.Sha1.hash(encoded_data.items, &hash_buffer, .{});
+
+        return hash_buffer;
+    }
+};
 
 pub const TorrentMetadata = struct {
     announce: []const u8,
