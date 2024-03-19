@@ -3,10 +3,11 @@ const stdout = std.io.getStdOut().writer();
 // const Scanner = @import("./bencoded.zig").Scanner;
 const bencoded = @import("./bencoded.zig");
 const TorrentMetadata = @import("torrent.zig").TorrentMetadata;
+const TorrentClient = @import("client.zig");
 const peekStream = @import("peek_stream.zig").peekStream;
 const assert = std.debug.assert;
 
-const Command = enum { decode, info };
+const Command = enum { decode, info, peers };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 100 }){};
@@ -64,6 +65,25 @@ pub fn main() !void {
             , .{ torrent_meta_data.announce, torrent_meta_data.info.length, std.fmt.fmtSliceHexLower(&hash), torrent_meta_data.info.@"piece length" });
             for (piece_hashes) |h| {
                 try stdout.print("{s}\n", .{std.fmt.fmtSliceHexLower(&h)});
+            }
+        },
+        .peers => {
+            const path = args[2];
+            var file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
+            defer file.close();
+
+            var peek_stream = peekStream(1, file.reader());
+
+            var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
+            defer decoded_content.deinit(allocator);
+
+            const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
+            var torrent_client = TorrentClient.new(allocator, torrent_meta_data);
+            defer torrent_client.deinit();
+            const peers = try torrent_client.getPeers();
+            defer allocator.free(peers);
+            for (peers) |peer| {
+                try stdout.print("{}\n", .{peer});
             }
         },
     }
