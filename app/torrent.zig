@@ -13,9 +13,9 @@ pub const TorrentInfo = struct {
         return sha1_hash.finalResult();
     }
 
-    pub fn getPiecesHashes(self: @This()) [3][std.crypto.hash.Sha1.digest_length]u8 {
-        var hash_pieces: [3][std.crypto.hash.Sha1.digest_length]u8 = undefined;
+    pub fn getPiecesHashes(self: @This(), gpa: std.mem.Allocator) ![][std.crypto.hash.Sha1.digest_length]u8 {
         var iterator = std.mem.window(u8, self.pieces, 20, 20);
+        var hash_pieces = try gpa.alloc([std.crypto.hash.Sha1.digest_length]u8, @divTrunc(self.pieces.len + 19, 20));
 
         var index: usize = 0;
         while (iterator.next()) |v| {
