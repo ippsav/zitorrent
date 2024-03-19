@@ -44,12 +44,17 @@ pub fn main() !void {
 
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
             const hash = try torrent_meta_data.info.getInfoHash();
+            const piece_hashes = torrent_meta_data.info.getPiecesHashes();
             try stdout.print(
                 \\Tracker URL: {s}
                 \\Length: {d}
                 \\Info Hash: {s}
+                \\Pieces:
                 \\
             , .{ torrent_meta_data.announce, torrent_meta_data.info.length, std.fmt.fmtSliceHexLower(&hash) });
+            for (piece_hashes) |h| {
+                try stdout.print("{s}\n", .{std.fmt.fmtSliceHexLower(&h)});
+            }
         },
     }
 }

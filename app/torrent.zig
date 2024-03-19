@@ -12,6 +12,18 @@ pub const TorrentInfo = struct {
         try bencoded.encodeValue(self, sha1_hash.writer());
         return sha1_hash.finalResult();
     }
+
+    pub fn getPiecesHashes(self: @This()) [3][std.crypto.hash.Sha1.digest_length]u8 {
+        var hash_piece_1: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+        var hash_piece_2: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+        var hash_piece_3: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+
+        std.crypto.hash.Sha1.hash(self.pieces[0..20], &hash_piece_1, .{});
+        std.crypto.hash.Sha1.hash(self.pieces[20..40], &hash_piece_2, .{});
+        std.crypto.hash.Sha1.hash(self.pieces[40..60], &hash_piece_3, .{});
+
+        return .{ hash_piece_1, hash_piece_2, hash_piece_3 };
+    }
 };
 
 pub const TorrentMetadata = struct {
