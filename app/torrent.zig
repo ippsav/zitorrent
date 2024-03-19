@@ -19,7 +19,7 @@ pub const TorrentInfo = struct {
 
         var index: usize = 0;
         while (iterator.next()) |v| {
-            std.crypto.hash.Sha1.hash(v, &hash_pieces[index], .{});
+            hash_pieces[index] = v[0..20].*;
             index += 1;
         }
         return hash_pieces;
