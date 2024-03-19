@@ -4,7 +4,7 @@ const bencoded = @import("bencoded.zig");
 pub const TorrentInfo = struct {
     length: usize,
     name: []const u8,
-    piece_length: usize,
+    @"piece length": usize,
     pieces: []const u8,
 
     pub fn getInfoHash(self: @This()) ![std.crypto.hash.Sha1.digest_length]u8 {
@@ -34,7 +34,7 @@ pub const TorrentMetadata = struct {
 
         return TorrentMetadata{ .info = TorrentInfo{
             .pieces = pieces,
-            .piece_length = piece_length,
+            .@"piece length" = piece_length,
             .length = length,
             .name = name,
         }, .announce = announce };
