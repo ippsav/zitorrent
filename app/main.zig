@@ -45,8 +45,7 @@ pub fn main() !void {
 
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
             const hash = try torrent_meta_data.info.getInfoHash();
-            const piece_hashes = try torrent_meta_data.info.getPiecesHashes(allocator);
-            defer allocator.free(piece_hashes);
+            var piece_hashes_iterator = torrent_meta_data.info.getPiecesHashes();
             // Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
             // Length: 92063
             // Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
@@ -63,7 +62,7 @@ pub fn main() !void {
                 \\Pieces Hashes:
                 \\
             , .{ torrent_meta_data.announce, torrent_meta_data.info.length, std.fmt.fmtSliceHexLower(&hash), torrent_meta_data.info.@"piece length" });
-            for (piece_hashes) |h| {
+            while (piece_hashes_iterator.next()) |h| {
                 try stdout.print("{s}\n", .{std.fmt.fmtSliceHexLower(&h)});
             }
         },

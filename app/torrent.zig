@@ -1,6 +1,24 @@
 const std = @import("std");
 const bencoded = @import("bencoded.zig");
 
+pub const HashPiecesIterator = struct {
+    cursor: ?usize,
+    buffer: []const u8,
+
+    pub fn next(self: *HashPiecesIterator) ?[20]u8 {
+        const start = self.cursor orelse return null;
+        const end = if (start + 20 < self.buffer.len) blk: {
+            self.cursor = start + 20;
+            break :blk start + 20;
+        } else blk: {
+            self.cursor = null;
+            break :blk self.buffer.len;
+        };
+
+        return self.buffer[start..end][0..20].*;
+    }
+};
+
 pub const TorrentInfo = struct {
     length: usize,
     name: []const u8,
@@ -13,16 +31,11 @@ pub const TorrentInfo = struct {
         return sha1_hash.finalResult();
     }
 
-    pub fn getPiecesHashes(self: @This(), gpa: std.mem.Allocator) ![][std.crypto.hash.Sha1.digest_length]u8 {
-        var iterator = std.mem.window(u8, self.pieces, 20, 20);
-        var hash_pieces = try gpa.alloc([std.crypto.hash.Sha1.digest_length]u8, @divTrunc(self.pieces.len + 19, 20));
-
-        var index: usize = 0;
-        while (iterator.next()) |v| {
-            hash_pieces[index] = v[0..20].*;
-            index += 1;
-        }
-        return hash_pieces;
+    pub fn getPiecesHashesIterator(self: @This()) HashPiecesIterator {
+        return .{
+            .buffer = self.pieces,
+            .cursor = 0,
+        };
     }
 };
 
