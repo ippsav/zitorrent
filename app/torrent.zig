@@ -14,15 +14,15 @@ pub const TorrentInfo = struct {
     }
 
     pub fn getPiecesHashes(self: @This()) [3][std.crypto.hash.Sha1.digest_length]u8 {
-        var hash_piece_1: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
-        var hash_piece_2: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
-        var hash_piece_3: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+        var hash_pieces: [3][std.crypto.hash.Sha1.digest_length]u8 = undefined;
+        var iterator = std.mem.window(u8, self.pieces, 20, 20);
 
-        std.crypto.hash.Sha1.hash(self.pieces[0..20], &hash_piece_1, .{});
-        std.crypto.hash.Sha1.hash(self.pieces[20..40], &hash_piece_2, .{});
-        std.crypto.hash.Sha1.hash(self.pieces[40..60], &hash_piece_3, .{});
-
-        return .{ hash_piece_1, hash_piece_2, hash_piece_3 };
+        var index: usize = 0;
+        while (iterator.next()) |v| {
+            std.crypto.hash.Sha1.hash(v, &hash_pieces[index], .{});
+            index += 1;
+        }
+        return hash_pieces;
     }
 };
 
