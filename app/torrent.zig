@@ -2,16 +2,16 @@ const std = @import("std");
 const bencoded = @import("bencoded.zig");
 
 pub const HashPiecesIterator = struct {
-    cursor: ?usize,
+    cursor: usize,
     buffer: []const u8,
 
     pub fn next(self: *HashPiecesIterator) ?[20]u8 {
-        const start = self.cursor orelse return null;
+        if (self.cursor >= self.buffer.len) return null;
+        const start = self.cursor;
+        self.cursor = start + 20;
         const end = if (start + 20 < self.buffer.len) blk: {
-            self.cursor = start + 20;
             break :blk start + 20;
         } else blk: {
-            self.cursor = null;
             break :blk self.buffer.len;
         };
 
@@ -32,6 +32,7 @@ pub const TorrentInfo = struct {
     }
 
     pub fn getPiecesHashesIterator(self: @This()) HashPiecesIterator {
+        std.debug.assert(self.pieces.len % 20 == 0);
         return .{
             .buffer = self.pieces,
             .cursor = 0,
