@@ -77,7 +77,7 @@ pub const TrackerResponse = struct {
         defer peers_array_list.deinit();
         var iterator = std.mem.window(u8, peers_bytes_value.string, 6, 6);
         while (iterator.next()) |peer_addr| {
-            const port: u16 = @bitCast(peer_addr[4..6].*);
+            const port: u16 = std.mem.readInt(u16, peer_addr[4..6], .big);
             const ipv4 = std.net.Ip4Address.init(peer_addr[0..4].*, port);
             try peers_array_list.append(ipv4);
         }

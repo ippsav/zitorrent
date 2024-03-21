@@ -118,13 +118,8 @@ pub fn main() !void {
             };
             std.debug.print("attemption handshake with: {}\n", .{ip});
             const reader = try torrent.handshakePeer(handshake_message, ip);
-            _ = reader;
-            // defer torrent_client.deinit();
-            // const peers = try torrent_client.getPeers();
-            // defer allocator.free(peers);
-            // for (peers) |peer| {
-            //     try stdout.print("{}\n", .{peer});
-            // }
+            const handshake = try reader.readStruct(torrent.HandshakeMessage);
+            try stdout.print("Peer ID: {s}\n", .{std.fmt.fmtSliceHexLower(&handshake.peer_id)});
         },
     }
 }
