@@ -67,6 +67,27 @@ pub const TorrentMetadata = struct {
     }
 };
 
+pub const HandshakeMessage = extern struct {
+    protocol_length: u8 align(1) = 19,
+    protocol: [19]u8 align(1) = "BitTorrent protocol".*,
+    reserved: [8]u8 align(1) = std.mem.zeroes([8]u8),
+    info_hash: [20]u8 align(1),
+    peer_id: [20]u8 align(1) = "00112233445566778899".*,
+    // length of the protocol string (BitTorrent protocol) which is 19 (1 byte)
+    // the string BitTorrent protocol (19 bytes)
+    // eight reserved bytes, which are all set to zero (8 bytes)
+    // sha1 infohash (20 bytes) (NOT the hexadecimal representation, which is 40 bytes long)
+    // peer id (20 bytes) (you can use 00112233445566778899 for this challenge)
+
+};
+
+pub fn handshakePeer(handshake: HandshakeMessage, address: std.net.Address) !std.net.Stream.Reader {
+    const connection_stream = try std.net.tcpConnectToAddress(address);
+    const writer = connection_stream.writer();
+    try writer.writeStruct(handshake);
+    return connection_stream.reader();
+}
+
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt, args);
     std.process.exit(1);

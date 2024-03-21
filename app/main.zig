@@ -2,12 +2,13 @@ const std = @import("std");
 const stdout = std.io.getStdOut().writer();
 // const Scanner = @import("./bencoded.zig").Scanner;
 const bencoded = @import("./bencoded.zig");
+const torrent = @import("torrent.zig");
 const TorrentMetadata = @import("torrent.zig").TorrentMetadata;
 const TorrentClient = @import("client.zig");
 const peekStream = @import("peek_stream.zig").peekStream;
 const assert = std.debug.assert;
 
-const Command = enum { decode, info, peers };
+const Command = enum { decode, info, peers, handshake };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 100 }){};
@@ -84,6 +85,46 @@ pub fn main() !void {
             for (peers) |peer| {
                 try stdout.print("{}\n", .{peer});
             }
+        },
+        .handshake => {
+            const path = args[2];
+            if (args.len < 4) {
+                fatal("Missing peer ip (<peer_ip>:<peer_port>)", .{});
+            }
+            const ip_str = std.mem.trim(u8, args[3], " ");
+            const delimiter_index = std.mem.indexOfScalar(u8, ip_str, ':') orelse {
+                fatal("Invalid peer ip. (<peer_ip>:<peer_port>)", .{});
+            };
+            const port = std.fmt.parseInt(u16, ip_str[delimiter_index + 1 ..], 10) catch {
+                fatal("Invalid peer port. (<peer_ip>:<peer_port>)", .{});
+            };
+            const ip = std.net.Address.resolveIp(ip_str[0..delimiter_index], port) catch {
+                fatal("Invalid peer ip. (<peer_ip>:<peer_port>)", .{});
+            };
+
+            var file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
+            defer file.close();
+
+            var peek_stream = peekStream(1, file.reader());
+
+            var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
+            defer decoded_content.deinit(allocator);
+
+            const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
+            const hash = try torrent_meta_data.info.getInfoHash();
+
+            const handshake_message = torrent.HandshakeMessage{
+                .info_hash = hash,
+            };
+            std.debug.print("attemption handshake with: {}\n", .{ip});
+            const reader = try torrent.handshakePeer(handshake_message, ip);
+            _ = reader;
+            // defer torrent_client.deinit();
+            // const peers = try torrent_client.getPeers();
+            // defer allocator.free(peers);
+            // for (peers) |peer| {
+            //     try stdout.print("{}\n", .{peer});
+            // }
         },
     }
 }
