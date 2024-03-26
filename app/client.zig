@@ -57,7 +57,7 @@ pub const TrackerResponse = struct {
     interval: u8,
     // A string, which contains list of peers that your client can connect to.
     // Each peer is represented using 6 bytes. The first 4 bytes are the peer's IP address and the last 2 bytes are the peer's port number.
-    peers: []std.net.Ip4Address,
+    peers: []std.net.Address,
 
     pub fn parseResponseFromStream(gpa: std.mem.Allocator, reader: anytype) !TrackerResponse {
         var peek_stream = peekStream(1, reader);
@@ -73,15 +73,16 @@ pub const TrackerResponse = struct {
         std.debug.assert(interval_value == .int);
         const interval: u8 = @intCast(interval_value.int);
 
-        var peers_array_list = std.ArrayList(std.net.Ip4Address).init(gpa);
+        var peers_array_list = std.ArrayList(std.net.Address).init(gpa);
         defer peers_array_list.deinit();
         var iterator = std.mem.window(u8, peers_bytes_value.string, 6, 6);
         while (iterator.next()) |peer_addr| {
             const port: u16 = std.mem.readInt(u16, peer_addr[4..6], .big);
-            const ipv4 = std.net.Ip4Address.init(peer_addr[0..4].*, port);
-            try peers_array_list.append(ipv4);
+            const ip = std.net.Address.initIp4(peer_addr[0..4].*, port);
+            try peers_array_list.append(ip);
         }
         const peers = try peers_array_list.toOwnedSlice();
+
         return .{
             .peers = peers,
             .interval = interval,
@@ -93,7 +94,7 @@ pub fn new(gpa: std.mem.Allocator, metadata: torrent.TorrentMetadata) Self {
     return .{ .gpa = gpa, .torrent_metadata = metadata, .client = std.http.Client{ .allocator = gpa } };
 }
 
-pub fn getPeers(self: *Self) ![]std.net.Ip4Address {
+pub fn getPeers(self: *Self) ![]std.net.Address {
     const hash = try self.torrent_metadata.info.getInfoHash();
 
     const tracker_request_params = TrackerRequestParams.new(hash, self.torrent_metadata.info.length);
