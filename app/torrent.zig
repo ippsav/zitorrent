@@ -201,9 +201,12 @@ pub const BittorrentClient = struct {
 
     pub fn readMessage(self: BittorrentClient) !Message {
         const r = self.connection_stream.reader();
-        const ml_bytes = try r.readBoundedBytes(4);
-        // message length
-        _ = std.mem.readInt(u32, ml_bytes.slice()[0..4], .big);
+        var ml: u32 = 0;
+        while (ml == 0) ml = try r.readInt(u32, .big);
+
+        // const ml_bytes = try r.readBoundedBytes(4);
+        // // message length
+        // _ = std.mem.readInt(u32, ml_bytes.slice()[0..4], .big);
         const b = try r.readByte();
         const mt = MessageType.fromByte(b);
 
