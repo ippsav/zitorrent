@@ -234,7 +234,7 @@ pub const BittorrentClient = struct {
                 try w.writeInt(u8, @intFromEnum(message.type), .big);
             },
             .request => {
-                const length: u32 = Payload.size - @sizeOf([]u8) + 1;
+                const length: u32 = Payload.size - @sizeOf([]u8) - @sizeOf(u32) + 1;
 
                 const payload = message.payload.?;
                 try w.writeInt(u32, length, .big);
