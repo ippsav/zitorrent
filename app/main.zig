@@ -8,7 +8,7 @@ const TorrentClient = @import("client.zig");
 const peekStream = @import("peek_stream.zig").peekStream;
 const assert = std.debug.assert;
 
-const Command = enum { decode, info, peers, handshake };
+const Command = enum { decode, info, peers, handshake, download_piece };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 100 }){};
@@ -47,14 +47,7 @@ pub fn main() !void {
             const torrent_meta_data = try TorrentMetadata.getTorrentMetadata(decoded_content);
             const hash = try torrent_meta_data.info.getInfoHash();
             var piece_hashes_iterator = torrent_meta_data.info.getPiecesHashesIterator();
-            // Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
-            // Length: 92063
-            // Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
-            // Piece Length: 32768
-            // Piece Hashes:
-            // e876f67a2a8886e8f36b136726c30fa29703022d
-            // 6e2275e604a0766656736e81ff10b55204ad8d35
-            // f00d937a0213df1982bc8d097227ad9e909acc17
+
             try stdout.print(
                 \\Tracker URL: {s}
                 \\Length: {d}
@@ -116,10 +109,53 @@ pub fn main() !void {
             const handshake_message = torrent.HandshakeMessage{
                 .info_hash = hash,
             };
-            std.debug.print("attemption handshake with: {}\n", .{ip});
-            const reader = try torrent.handshakePeer(handshake_message, ip);
+
+            const connection_stream = try torrent.handshakePeerAndGetStream(handshake_message, ip);
+            const reader = connection_stream.reader();
             const handshake = try reader.readStruct(torrent.HandshakeMessage);
             try stdout.print("Peer ID: {s}\n", .{std.fmt.fmtSliceHexLower(&handshake.peer_id)});
+        },
+        .download_piece => {
+            if (args.len < 6) {
+                fatal("Missing arguments expected 6 args got {d}. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{args.len});
+            }
+
+            if (!std.mem.eql(u8, args[2], "-o"))
+                fatal("Invalid flag. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{});
+
+            // const temp_path = args[3];
+            const torrent_path = args[4];
+            // const piece_number = std.fmt.parseInt(usize, args[5], 10) catch {
+            //     fatal("Invalid piece number got {s}. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{args[5]});
+            // };
+
+            var file = try std.fs.cwd().openFile(torrent_path, .{ .mode = .read_only });
+            defer file.close();
+
+            var peek_stream = peekStream(1, file.reader());
+
+            // Decoding torrent file
+            var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
+            defer decoded_content.deinit(allocator);
+            const torrent_metadata = try TorrentMetadata.getTorrentMetadata(decoded_content);
+
+            // Getting peers
+            var torrent_client = TorrentClient.new(allocator, torrent_metadata);
+            defer torrent_client.deinit();
+
+            const peers = try torrent_client.getPeers();
+            defer allocator.free(peers);
+
+            const bt_client = try torrent.BittorrentClient.init(peers, torrent_metadata);
+            const hash = try torrent_metadata.info.getInfoHash();
+
+            // handshake with peer
+            const hm = try bt_client.handshake(hash);
+            try stdout.print("Peer ID: {s}\n", .{std.fmt.fmtSliceHexLower(&hm.peer_id)});
+
+            // get peer messages
+            const p = try bt_client.download_piece(1);
+            _ = p;
         },
     }
 }
@@ -130,5 +166,5 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 fn fatalHelp() noreturn {
-    fatal("Usage: your_bittorent.zig <command> <args>", .{});
+    fatal("Usage: your_bittorent <command> <args>", .{});
 }
