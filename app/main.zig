@@ -125,9 +125,9 @@ pub fn main() !void {
 
             // const temp_path = args[3];
             const torrent_path = args[4];
-            // const piece_number = std.fmt.parseInt(usize, args[5], 10) catch {
-            //     fatal("Invalid piece number got {s}. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{args[5]});
-            // };
+            const piece_number = std.fmt.parseInt(u32, args[5], 10) catch {
+                fatal("Invalid piece number got {s}. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{args[5]});
+            };
 
             var file = try std.fs.cwd().openFile(torrent_path, .{ .mode = .read_only });
             defer file.close();
@@ -146,7 +146,7 @@ pub fn main() !void {
             const peers = try torrent_client.getPeers();
             defer allocator.free(peers);
 
-            const bt_client = try torrent.BittorrentClient.init(peers, torrent_metadata);
+            const bt_client = try torrent.BittorrentClient.init(allocator, peers, torrent_metadata);
             const hash = try torrent_metadata.info.getInfoHash();
 
             // handshake with peer
@@ -154,7 +154,7 @@ pub fn main() !void {
             try stdout.print("Peer ID: {s}\n", .{std.fmt.fmtSliceHexLower(&hm.peer_id)});
 
             // get peer messages
-            const p = try bt_client.download_piece(1);
+            const p = try bt_client.download_piece(piece_number);
             _ = p;
         },
     }

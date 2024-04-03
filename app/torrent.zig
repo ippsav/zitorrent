@@ -1,6 +1,8 @@
 const std = @import("std");
 const bencoded = @import("bencoded.zig");
 
+const block_size = 16 * 1024;
+
 pub const HashPiecesIterator = struct {
     cursor: usize,
     buffer: []const u8,
@@ -91,21 +93,42 @@ pub const MessageType = enum(u8) {
     }
 };
 
-const block_size = 4 * 1024;
+// Request:
+//  index: the zero-based piece index
+//  begin: the zero-based byte offset within the piece
+//  length: the length of the block in bytes
 
-pub const Payload = struct {
-    const size = @sizeOf(@This());
-
+pub const RequestPayload = struct {
     index: u32,
     begin: u32,
-    length: ?u32 = null,
-    block: ?[]u8 = null,
+    length: u32,
+};
+
+pub const PiecePayload = struct {
+    index: u32,
+    begin: u32,
+    block: []u8,
+};
+
+pub const Payload = union(MessageType) {
+    choke: void,
+    unchoke: void,
+    interested: void,
+    @"not interested": void,
+    have: u32,
+    bitfield: void,
+    request: RequestPayload,
+    piece: PiecePayload,
+    cancel: RequestPayload,
 };
 
 pub const Message = struct {
     type: MessageType,
+    payload: Payload,
 
-    payload: ?Payload = null,
+    pub fn init(m_type: MessageType, payload: Payload) Message {
+        return .{ .type = m_type, .payload = payload };
+    }
 };
 
 pub const BittorrentClient = struct {
@@ -113,12 +136,15 @@ pub const BittorrentClient = struct {
     torrent_metadata: TorrentMetadata,
     connection_stream: std.net.Stream,
 
-    pub fn init(peers: []std.net.Address, torrent_metadata: TorrentMetadata) !BittorrentClient {
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, peers: []std.net.Address, torrent_metadata: TorrentMetadata) !BittorrentClient {
         for (peers) |peer| {
             const connection_stream = std.net.tcpConnectToAddress(peer) catch {
                 continue;
             };
             return .{
+                .allocator = allocator,
                 .peers = peers,
                 .torrent_metadata = torrent_metadata,
                 .connection_stream = connection_stream,
@@ -137,7 +163,10 @@ pub const BittorrentClient = struct {
         return try r.readStruct(HandshakeMessage);
     }
 
-    pub fn download_piece(self: BittorrentClient, piece_index: u32) !Message {
+    pub fn download_piece(
+        self: BittorrentClient,
+        piece_index: usize,
+    ) !void {
         if (piece_index >= self.torrent_metadata.info.pieces.len / 20) return error.InvalidPieceIndex;
 
         const piece_length = blk: {
@@ -149,43 +178,35 @@ pub const BittorrentClient = struct {
         };
 
         const bm = try self.readMessage();
-        std.debug.assert(bm.type == .bitfield);
 
-        const im = Message{
-            .type = .interested,
-        };
+        std.debug.assert(bm.type == .bitfield);
+        std.debug.print("{any}\n", .{bm});
+
+        const im = Message.init(.interested, .{ .interested = {} });
         try self.sendMessage(im);
 
         _ = try self.readMessage();
 
-        std.debug.print("{d}\n", .{self.torrent_metadata.info.pieces.len / 20});
-
-        std.debug.print(
-            \\block size: {d}
-            \\total length: {d}
-            \\piece length: {d}
-            \\current piece length: {d}
-            \\
-        , .{ block_size, self.torrent_metadata.info.length, self.torrent_metadata.info.@"piece length", piece_length });
-
         const num_of_blocks = piece_length / block_size;
-        // const last_block_size = piece_length % block_size;
+        const last_block_size = piece_length % block_size;
+        std.debug.print("num of blocks: {d}\n", .{num_of_blocks});
 
         for (0..num_of_blocks) |i| {
             const rm = Message{
                 .type = .request,
-                .payload = .{
-                    .length = @intCast(piece_length),
-                    .index = piece_index,
-                    .begin = @intCast(i * block_size),
-                },
+                .payload = .{ .request = .{
+                    .length = @intCast(block_size),
+                    .index = @intCast(piece_index),
+                    .begin = @intCast(block_size * i),
+                } },
             };
 
             try self.sendMessage(rm);
 
             const pm = try self.readMessage();
-            _ = pm;
+            std.debug.print("piece message {any}\n", .{pm});
         }
+        if (last_block_size != 0) {}
 
         return error.Test;
     }
@@ -204,47 +225,68 @@ pub const BittorrentClient = struct {
         var ml: u32 = 0;
         while (ml == 0) ml = try r.readInt(u32, .big);
 
-        // const ml_bytes = try r.readBoundedBytes(4);
-        // // message length
-        // _ = std.mem.readInt(u32, ml_bytes.slice()[0..4], .big);
         const b = try r.readByte();
+        std.debug.print("message type byte: {d}\n", .{b});
         const mt = MessageType.fromByte(b);
 
-        std.debug.print("{any}\n", .{mt});
-
-        switch (mt) {
-            .bitfield => {
-                return .{
-                    .type = mt,
-                };
+        return switch (mt) {
+            .bitfield => Message.init(mt, .{ .bitfield = {} }),
+            .choke => Message.init(mt, .{ .choke = {} }),
+            .unchoke => Message.init(mt, .{ .unchoke = {} }),
+            .interested => Message.init(mt, .{ .interested = {} }),
+            .@"not interested" => Message.init(mt, .{ .@"not interested" = {} }),
+            .have => {
+                const index = try r.readInt(u32, .big);
+                return Message.init(mt, .{ .have = index });
             },
-            .unchoke => {
-                return .{
-                    .type = mt,
-                };
+            .request, .cancel => {
+                const index = try r.readInt(u32, .big);
+                const begin = try r.readInt(u32, .big);
+                const length = try r.readInt(u32, .big);
+                return Message.init(mt, .{
+                    .request = .{ .index = index, .begin = begin, .length = length },
+                });
             },
-            else => unreachable,
-        }
+            .piece => {
+                const index = try r.readInt(u32, .big);
+                const begin = try r.readInt(u32, .big);
+                const block = try self.allocator.alloc(u8, ml - 9);
+                _ = try r.readAll(block);
+                return Message.init(mt, .{
+                    .piece = .{ .index = index, .begin = begin, .block = block },
+                });
+            },
+        };
     }
 
-    pub fn sendMessage(self: BittorrentClient, message: Message) !void {
+    pub inline fn sendMessage(self: BittorrentClient, message: Message) !void {
         const w = self.connection_stream.writer();
 
         //'choke', 'unchoke', 'interested', and 'not interested' have no payload.
+
         switch (message.type) {
             .choke, .unchoke, .interested, .@"not interested" => {
                 try w.writeInt(u32, 1, .big);
                 try w.writeInt(u8, @intFromEnum(message.type), .big);
             },
             .request => {
-                const length: u32 = Payload.size - @sizeOf([]u8) - @sizeOf(u32) + 1;
+                const length: u32 = @sizeOf(RequestPayload) + 1;
 
-                const payload = message.payload.?;
+                // Logging
+                std.debug.print(
+                    \\message length: {d}
+                    \\message.type: {d}
+                    \\index: {d}
+                    \\begin: {d}
+                    \\payload length: {d}
+                    \\
+                , .{ length, @intFromEnum(message.type), message.payload.request.index, message.payload.request.begin, message.payload.request.length });
+                const payload = message.payload.request;
                 try w.writeInt(u32, length, .big);
-                try w.writeInt(u8, @intFromEnum(message.type), .big);
+                try w.writeByte(@intFromEnum(message.type));
                 try w.writeInt(u32, payload.index, .big);
                 try w.writeInt(u32, payload.begin, .big);
-                try w.writeInt(u32, payload.length.?, .big);
+                try w.writeInt(u32, payload.length, .big);
             },
             else => return,
         }
