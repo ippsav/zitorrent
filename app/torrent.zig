@@ -116,7 +116,7 @@ pub const Payload = union(MessageType) {
     interested: void,
     @"not interested": void,
     have: u32,
-    bitfield: void,
+    bitfield: []u8,
     request: RequestPayload,
     piece: PiecePayload,
     cancel: RequestPayload,
@@ -128,6 +128,18 @@ pub const Message = struct {
 
     pub fn init(m_type: MessageType, payload: Payload) Message {
         return .{ .type = m_type, .payload = payload };
+    }
+
+    pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
+        switch (self.type) {
+            .bitfield => {
+                allocator.free(self.payload.bitfield);
+            },
+            .piece => {
+                allocator.free(self.payload.piece.block);
+            },
+            else => {},
+        }
     }
 };
 
@@ -163,10 +175,7 @@ pub const BittorrentClient = struct {
         return try r.readStruct(HandshakeMessage);
     }
 
-    pub fn download_piece(
-        self: BittorrentClient,
-        piece_index: usize,
-    ) !void {
+    pub fn download_piece(self: BittorrentClient, piece_index: usize, writer: anytype) !void {
         if (piece_index >= self.torrent_metadata.info.pieces.len / 20) return error.InvalidPieceIndex;
 
         const piece_length = blk: {
@@ -177,10 +186,9 @@ pub const BittorrentClient = struct {
             break :blk self.torrent_metadata.info.@"piece length";
         };
 
-        const bm = try self.readMessage();
-
+        var bm = try self.readMessage();
+        defer bm.deinit(self.allocator);
         std.debug.assert(bm.type == .bitfield);
-        std.debug.print("{any}\n", .{bm});
 
         const im = Message.init(.interested, .{ .interested = {} });
         try self.sendMessage(im);
@@ -189,26 +197,131 @@ pub const BittorrentClient = struct {
 
         const num_of_blocks = piece_length / block_size;
         const last_block_size = piece_length % block_size;
+        std.debug.print("piece length: {d}\n", .{piece_length});
         std.debug.print("num of blocks: {d}\n", .{num_of_blocks});
+        std.debug.print("last block size: {d}\n", .{last_block_size});
+
+        var piece_hash = std.crypto.hash.Sha1.init(.{});
+        const hash_writer = piece_hash.writer();
 
         for (0..num_of_blocks) |i| {
-            const rm = Message{
-                .type = .request,
-                .payload = .{ .request = .{
-                    .length = @intCast(block_size),
-                    .index = @intCast(piece_index),
-                    .begin = @intCast(block_size * i),
-                } },
-            };
+            const rm = Message.init(.request, .{ .request = .{
+                .length = @intCast(block_size),
+                .index = @intCast(piece_index),
+                .begin = @intCast(block_size * i),
+            } });
 
             try self.sendMessage(rm);
 
-            const pm = try self.readMessage();
-            std.debug.print("piece message {any}\n", .{pm});
+            var pm = try self.readMessage();
+            std.debug.assert(pm.type == .piece);
+            _ = try hash_writer.write(pm.payload.piece.block);
+            // write into file
+            _ = try writer.write(pm.payload.piece.block);
+            std.debug.print("block len: {d}\n", .{pm.payload.piece.block.len});
+            pm.deinit(self.allocator);
         }
-        if (last_block_size != 0) {}
+        if (last_block_size != 0) {
+            const rm = Message.init(.request, .{ .request = .{
+                .length = @intCast(last_block_size),
+                .index = @intCast(piece_index),
+                .begin = @intCast(block_size * num_of_blocks),
+            } });
 
-        return error.Test;
+            try self.sendMessage(rm);
+
+            var pm = try self.readMessage();
+            std.debug.assert(pm.type == .piece);
+            _ = try hash_writer.write(pm.payload.piece.block);
+            // write into file
+            _ = try writer.write(pm.payload.piece.block);
+            std.debug.print("block len: {d}\n", .{pm.payload.piece.block.len});
+            pm.deinit(self.allocator);
+        }
+
+        const hash = piece_hash.finalResult();
+        const expected_hash: []const u8 = self.torrent_metadata.info.pieces[piece_index * 20 .. piece_index * 20 + 20];
+
+        std.debug.print("got hash: {}\n", .{std.fmt.fmtSliceHexLower(&hash)});
+        std.debug.print("expected hash: {}\n", .{std.fmt.fmtSliceHexLower(expected_hash)});
+
+        std.debug.assert(std.mem.eql(u8, &hash, expected_hash));
+    }
+
+    pub fn download_file(self: BittorrentClient, writer: anytype) !void {
+        var pieces = std.mem.window(u8, self.torrent_metadata.info.pieces, 20, 20);
+        while (pieces.next()) |piece| {
+            std.debug.print("piece length {}\n", .{piece.len});
+        }
+
+        // const piece_length = blk: {
+        //     if (piece_index == (self.torrent_metadata.info.pieces.len / 20) - 1) {
+        //         const remainder = self.torrent_metadata.info.length % self.torrent_metadata.info.@"piece length";
+        //         if (remainder != 0) break :blk remainder;
+        //     }
+        //     break :blk self.torrent_metadata.info.@"piece length";
+        // };
+        //
+        // var bm = try self.readMessage();
+        // defer bm.deinit(self.allocator);
+        // std.debug.assert(bm.type == .bitfield);
+        //
+        // const im = Message.init(.interested, .{ .interested = {} });
+        // try self.sendMessage(im);
+        //
+        // _ = try self.readMessage();
+        //
+        // const num_of_blocks = piece_length / block_size;
+        // const last_block_size = piece_length % block_size;
+        // std.debug.print("piece length: {d}\n", .{piece_length});
+        // std.debug.print("num of blocks: {d}\n", .{num_of_blocks});
+        // std.debug.print("last block size: {d}\n", .{last_block_size});
+        //
+        // var piece_hash = std.crypto.hash.Sha1.init(.{});
+        // const hash_writer = piece_hash.writer();
+        //
+        // for (0..num_of_blocks) |i| {
+        //     const rm = Message.init(.request, .{ .request = .{
+        //         .length = @intCast(block_size),
+        //         .index = @intCast(piece_index),
+        //         .begin = @intCast(block_size * i),
+        //     } });
+        //
+        //     try self.sendMessage(rm);
+        //
+        //     var pm = try self.readMessage();
+        //     std.debug.assert(pm.type == .piece);
+        //     _ = try hash_writer.write(pm.payload.piece.block);
+        //     // write into file
+        //     _ = try writer.write(pm.payload.piece.block);
+        //     std.debug.print("block len: {d}\n", .{pm.payload.piece.block.len});
+        //     pm.deinit(self.allocator);
+        // }
+        // if (last_block_size != 0) {
+        //     const rm = Message.init(.request, .{ .request = .{
+        //         .length = @intCast(last_block_size),
+        //         .index = @intCast(piece_index),
+        //         .begin = @intCast(block_size * num_of_blocks),
+        //     } });
+        //
+        //     try self.sendMessage(rm);
+        //
+        //     var pm = try self.readMessage();
+        //     std.debug.assert(pm.type == .piece);
+        //     _ = try hash_writer.write(pm.payload.piece.block);
+        //     // write into file
+        //     _ = try writer.write(pm.payload.piece.block);
+        //     std.debug.print("block len: {d}\n", .{pm.payload.piece.block.len});
+        //     pm.deinit(self.allocator);
+        // }
+        //
+        // const hash = piece_hash.finalResult();
+        // const expected_hash: []const u8 = self.torrent_metadata.info.pieces[piece_index * 20 .. piece_index * 20 + 20];
+        //
+        // std.debug.print("got hash: {}\n", .{std.fmt.fmtSliceHexLower(&hash)});
+        // std.debug.print("expected hash: {}\n", .{std.fmt.fmtSliceHexLower(expected_hash)});
+        //
+        // std.debug.assert(std.mem.eql(u8, &hash, expected_hash));
     }
 
     // The message id for request is 6.
@@ -226,11 +339,15 @@ pub const BittorrentClient = struct {
         while (ml == 0) ml = try r.readInt(u32, .big);
 
         const b = try r.readByte();
-        std.debug.print("message type byte: {d}\n", .{b});
         const mt = MessageType.fromByte(b);
 
         return switch (mt) {
-            .bitfield => Message.init(mt, .{ .bitfield = {} }),
+            .bitfield => {
+                const block = try self.allocator.alloc(u8, ml - 1);
+                const nBytes = try r.readAll(block);
+                std.debug.assert(nBytes == block.len);
+                return Message.init(mt, .{ .bitfield = block });
+            },
             .choke => Message.init(mt, .{ .choke = {} }),
             .unchoke => Message.init(mt, .{ .unchoke = {} }),
             .interested => Message.init(mt, .{ .interested = {} }),
@@ -251,7 +368,8 @@ pub const BittorrentClient = struct {
                 const index = try r.readInt(u32, .big);
                 const begin = try r.readInt(u32, .big);
                 const block = try self.allocator.alloc(u8, ml - 9);
-                _ = try r.readAll(block);
+                const nBytes = try r.readAll(block);
+                std.debug.assert(nBytes == block.len);
                 return Message.init(mt, .{
                     .piece = .{ .index = index, .begin = begin, .block = block },
                 });
@@ -273,14 +391,6 @@ pub const BittorrentClient = struct {
                 const length: u32 = @sizeOf(RequestPayload) + 1;
 
                 // Logging
-                std.debug.print(
-                    \\message length: {d}
-                    \\message.type: {d}
-                    \\index: {d}
-                    \\begin: {d}
-                    \\payload length: {d}
-                    \\
-                , .{ length, @intFromEnum(message.type), message.payload.request.index, message.payload.request.begin, message.payload.request.length });
                 const payload = message.payload.request;
                 try w.writeInt(u32, length, .big);
                 try w.writeByte(@intFromEnum(message.type));

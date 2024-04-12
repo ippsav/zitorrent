@@ -123,7 +123,7 @@ pub fn main() !void {
             if (!std.mem.eql(u8, args[2], "-o"))
                 fatal("Invalid flag. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{});
 
-            // const temp_path = args[3];
+            const temp_path = args[3];
             const torrent_path = args[4];
             const piece_number = std.fmt.parseInt(u32, args[5], 10) catch {
                 fatal("Invalid piece number got {s}. (your_bittorent download_piece -o <output-path> <torrent-path> <piece-number>)", .{args[5]});
@@ -131,6 +131,9 @@ pub fn main() !void {
 
             var file = try std.fs.cwd().openFile(torrent_path, .{ .mode = .read_only });
             defer file.close();
+
+            var temp_file = try std.fs.createFileAbsolute(temp_path, .{ .read = true });
+            defer temp_file.close();
 
             var peek_stream = peekStream(1, file.reader());
 
@@ -154,8 +157,8 @@ pub fn main() !void {
             try stdout.print("Peer ID: {s}\n", .{std.fmt.fmtSliceHexLower(&hm.peer_id)});
 
             // get peer messages
-            const p = try bt_client.download_piece(piece_number);
-            _ = p;
+            try bt_client.download_piece(piece_number, temp_file.writer());
+            std.debug.print("download done\n", .{});
         },
     }
 }
