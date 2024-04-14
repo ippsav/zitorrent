@@ -163,20 +163,22 @@ pub fn main() !void {
         },
         .download => {
             if (args.len < 5) {
-                fatal("Missing arguments expected 6 args got {d}. (your_bittorent download_piece -o <output-path> <torrent-path>)", .{args.len});
+                fatal("Missing arguments expected 6 args got {d}. (your_bittorent download_piece -o <dir-path> <torrent-path>)", .{args.len});
             }
 
             if (!std.mem.eql(u8, args[2], "-o"))
-                fatal("Invalid flag. (your_bittorent download_piece -o <output-path> <torrent-path>)", .{});
+                fatal("Invalid flag. (your_bittorent download_piece -o <dir-path> <torrent-path>)", .{});
 
-            const temp_path = args[3];
+            const dir_path = args[3];
             const torrent_path = args[4];
+
+            const real_path = try std.fs.realpathAlloc(allocator, dir_path);
+            defer allocator.free(real_path);
+
+            const dir = try std.fs.openDirAbsolute(real_path, .{});
 
             var file = try std.fs.cwd().openFile(torrent_path, .{ .mode = .read_only });
             defer file.close();
-
-            var temp_file = try std.fs.createFileAbsolute(temp_path, .{ .read = true });
-            defer temp_file.close();
 
             var peek_stream = peekStream(1, file.reader());
 
@@ -184,6 +186,9 @@ pub fn main() !void {
             var decoded_content = try bencoded.decodeFromStream(allocator, &peek_stream);
             defer decoded_content.deinit(allocator);
             const torrent_metadata = try TorrentMetadata.getTorrentMetadata(decoded_content);
+
+            var temp_file = try dir.createFile(torrent_metadata.info.name, .{ .read = true });
+            defer temp_file.close();
 
             // Getting peers
             var torrent_client = TorrentClient.new(allocator, torrent_metadata);
