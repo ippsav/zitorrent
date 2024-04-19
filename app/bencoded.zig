@@ -240,6 +240,13 @@ fn encodeStruct(comptime struct_info: std.builtin.Type.Struct, value: anytype, w
 pub fn encodeValue(value: anytype, writer: anytype) @TypeOf(writer).Error!void {
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
+        .Array => |arr_info| {
+            switch (arr_info.child) {
+                Value => try encodeListValue(&value, writer),
+                u8 => try writer.print("{d}:{s}", .{ value.len, value }),
+                else => @compileError("invalid type " ++ @typeName(T)),
+            }
+        },
         .Pointer => |ptr_info| {
             switch (ptr_info.size) {
                 .Slice => switch (ptr_info.child) {
@@ -421,16 +428,16 @@ test "encode int64 value" {
     try std.testing.expectEqualStrings(expected, &out);
 }
 
-// test "encode list of values" {
-//     const decoded_value: [2]Value = .{ .{ .int = 64 }, .{ .string = "hello" } };
-//
-//     var out: [13]u8 = undefined;
-//
-//     var fbs = std.io.fixedBufferStream(&out);
-//
-//     const expected: []const u8 = "li64e5:helloe";
-//
-//     try encodeValue(&decoded_value, fbs.writer());
-//
-//     try std.testing.expectEqualStrings(expected, &out);
-// }
+test "encode list of values" {
+    const decoded_value: [2]Value = .{ .{ .int = 64 }, .{ .string = "hello" } };
+
+    var out: [13]u8 = undefined;
+
+    var fbs = std.io.fixedBufferStream(&out);
+
+    const expected: []const u8 = "li64e5:helloe";
+
+    try encodeValue(decoded_value, fbs.writer());
+
+    try std.testing.expectEqualStrings(expected, &out);
+}

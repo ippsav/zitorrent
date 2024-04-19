@@ -361,8 +361,11 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 test "MessageType" {
-    const byte = '1';
+    const bytes: [9]u8 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+    const expected_enum_values: [9]MessageType = .{ .choke, .unchoke, .interested, .@"not interested", .have, .bitfield, .request, .piece, .cancel };
 
-    const e = MessageType.fromByte(byte);
-    try std.testing.expectEqual(.unchoke, e);
+    for (0..bytes.len) |i| {
+        const e = MessageType.fromByte(bytes[i]);
+        try std.testing.expectEqual(expected_enum_values[i], e);
+    }
 }
